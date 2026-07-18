@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>f2b-sync — Geo-Block</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <style>
+    body { background: #0d1117; }
+    .navbar-brand { font-weight: 700; color: #58a6ff !important; }
+    #toast-container { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark border-bottom border-secondary">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/dashboard"><i class="bi bi-shield-fill-exclamation"></i> f2b-sync</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navMenu">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="/dashboard">Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link active" href="/geo-countries">Geo-Block</a></li>
+        <li class="nav-item"><a class="nav-link" href="/servers">Servers</a></li>
+        <li class="nav-item"><a class="nav-link" href="/whitelist">Whitelist</a></li>
+      </ul>
+      <button class="btn btn-outline-secondary btn-sm" id="logout-btn">
+        <i class="bi bi-box-arrow-right"></i> Logout
+      </button>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4">
+  <h4 class="mb-4">Geo-Block Countries</h4>
+
+  <!-- Add form -->
+  <div class="card border-secondary mb-4">
+    <div class="card-header">Add Country</div>
+    <div class="card-body">
+      <form id="add-form" class="row g-2">
+        <div class="col-md-2">
+          <input type="text" class="form-control" id="code" placeholder="Code (e.g. CN)" maxlength="2" required />
+        </div>
+        <div class="col-md-4">
+          <input type="text" class="form-control" id="name" placeholder="Country name" required />
+        </div>
+        <div class="col-md-2">
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="enabled" checked />
+            <label class="form-check-label" for="enabled">Enabled</label>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-primary w-100">Add / Update</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-responsive">
+    <table class="table table-dark table-hover table-sm">
+      <thead class="table-secondary">
+        <tr>
+          <th>Code</th>
+          <th>Country</th>
+          <th>Status</th>
+          <th>Added</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="countries-tbody">
+        <tr><td colspan="5" class="text-center text-muted">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/static/app.js"></script>
+<script>
+  requireAuth();
+
+  async function loadCountries() {
+    const tbody = document.getElementById('countries-tbody');
+    try {
+      const data = await apiGet('/api/v1/geo-countries');
+      const countries = data.countries ?? [];
+      if (countries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No countries configured</td></tr>';
+        return;
+      }
+      tbody.innerHTML = countries.map(c => `
+        <tr>
+          <td><span class="badge bg-secondary">${esc(c.country_code)}</span></td>
+          <td>${esc(c.country_name)}</td>
+          <td>
+            <button class="btn btn-sm ${c.enabled ? 'btn-success' : 'btn-outline-secondary'}"
+                    onclick="toggleCountry('${esc(c.country_code)}', '${esc(c.country_name)}', ${c.enabled ? 0 : 1})">
+              ${c.enabled ? 'Enabled' : 'Disabled'}
+            </button>
+          </td>
+          <td><small>${c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}</small></td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="deleteCountry('${esc(c.country_code)}')">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="text-danger">${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  async function toggleCountry(code, name, enabled) {
+    try {
+      await apiPost('/api/v1/geo-countries', { country_code: code, country_name: name, enabled: !!enabled });
+      showToast(`${code} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+      loadCountries();
+    } catch (e) {
+      showToast(e.message, 'danger');
+    }
+  }
+
+  async function deleteCountry(code) {
+    if (!confirm(`Remove ${code} from geo-block list?`)) return;
+    try {
+      await apiDelete(`/api/v1/geo-countries/${code}`);
+      showToast(`Removed ${code}`, 'success');
+      loadCountries();
+    } catch (e) {
+      showToast(e.message, 'danger');
+    }
+  }
+
+  document.getElementById('add-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      country_code: document.getElementById('code').value.trim().toUpperCase(),
+      country_name: document.getElementById('name').value.trim(),
+      enabled: document.getElementById('enabled').checked,
+    };
+    try {
+      await apiPost('/api/v1/geo-countries', body);
+      showToast(`Saved ${body.country_code}`, 'success');
+      e.target.reset();
+      document.getElementById('enabled').checked = true;
+      loadCountries();
+    } catch (err) {
+      showToast(err.message, 'danger');
+    }
+  });
+
+  document.getElementById('logout-btn').addEventListener('click', logout);
+  loadCountries();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

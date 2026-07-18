@@ -1,0 +1,12 @@
+# f2b-central.conf — Central collector configuration
+# Copy to /etc/f2b-central.conf and set correct values.
+# Permissions: chmod 600 /etc/f2b-central.conf
+
+# URL of the f2b-sync-api collector (no trailing slash)
+COLLECTOR_URL=https://f2b-sync.example.com
+
+# API key generated via the web UI (Servers page)
+API_KEY=your-api-key-here
+
+# Optional: custom server identifier (defaults to hostname)
+# SERVER_ID=my-server-01

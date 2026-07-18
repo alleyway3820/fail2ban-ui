@@ -1,0 +1,44 @@
+services:
+  # ── Existing fail2ban-ui ──────────────────────────────────────────────
+  fail2ban-ui:
+    image: swissmakers/fail2ban-ui:latest
+    container_name: fail2ban-ui
+    network_mode: host
+    environment:
+      - PORT=8080
+      # Set these in your .env or override here
+      # - CALLBACK_URL=http://your-host:8080
+      # - CALLBACK_SECRET=your-secret
+    volumes:
+      - /opt/fail2ban-data:/config
+      - /var/log:/var/log:ro
+      - /etc/fail2ban:/etc/fail2ban:ro
+      - /var/run/fail2ban:/var/run/fail2ban
+      - /usr/share/GeoIP:/usr/share/GeoIP:ro
+    restart: unless-stopped
+
+  # ── Sync API (global blocklist, geo-block, server management) ─────────
+  f2b-sync-api:
+    build:
+      context: ./f2b-sync-api
+      dockerfile: Dockerfile
+    container_name: f2b-sync-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_PATH=/data/f2b-sync.db
+      - DB_PATH=/opt/f2b-db/f2b.db
+      - JWT_SECRET=${F2B_JWT_SECRET:-change-me-to-a-random-64-char-string}
+      - ADMIN_PASSWORD=${F2B_ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      - GEOIP_DB_PATH=/data/GeoLite2-Country.mmdb
+    volumes:
+      - /opt/f2b-data:/data
+      - /opt/f2b-db:/opt/f2b-db:ro
+    depends_on:
+      - fail2ban-ui
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

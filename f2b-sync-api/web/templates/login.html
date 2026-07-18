@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>f2b-sync — Login</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+  <style>
+    body { background: #0d1117; }
+    .login-card { max-width: 400px; margin: 10vh auto; }
+    .brand { font-size: 1.4rem; font-weight: 700; letter-spacing: 1px; color: #58a6ff; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="login-card card shadow border-secondary">
+    <div class="card-body p-4">
+      <div class="text-center mb-4">
+        <div class="brand">f2b-sync-api</div>
+        <small class="text-muted">Centralized Fail2Ban Management</small>
+      </div>
+      <div id="error-alert" class="alert alert-danger d-none" role="alert"></div>
+      <form id="login-form">
+        <div class="mb-3">
+          <label for="username" class="form-label">Username</label>
+          <input type="text" class="form-control" id="username" name="username"
+                 autocomplete="username" required autofocus />
+        </div>
+        <div class="mb-3">
+          <label for="password" class="form-label">Password</label>
+          <input type="password" class="form-control" id="password" name="password"
+                 autocomplete="current-password" required />
+        </div>
+        <button type="submit" class="btn btn-primary w-100" id="login-btn">
+          Sign In
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Redirect if already logged in
+  if (localStorage.getItem('access_token')) {
+    window.location.href = '/dashboard';
+  }
+
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    const errAlert = document.getElementById('error-alert');
+    errAlert.classList.add('d-none');
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+
+    const body = {
+      username: document.getElementById('username').value,
+      password: document.getElementById('password').value,
+    };
+
+    try {
+      const res = await fetch('/api/v1/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Login failed');
+      }
+      localStorage.setItem('access_token', data.access_token);
+      localStorage.setItem('refresh_token', data.refresh_token);
+      window.location.href = '/dashboard';
+    } catch (err) {
+      errAlert.textContent = err.message;
+      errAlert.classList.remove('d-none');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  });
+</script>
+</body>
+</html>
