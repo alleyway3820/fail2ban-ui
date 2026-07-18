@@ -36,4 +36,5 @@ package-lock.json
 .tailwind-build/
 
 # Server specific test-files
-server
+server__pycache__/
+*.pyc

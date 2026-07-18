@@ -1,0 +1,153 @@
+# 
+# Complete fail2ban jail.local for FreeSWITCH/FusionPBX + CyberPanel + Pure-FTPd
+# Wired to f2b-sync-api central collector
+#
+# Copy to: /etc/fail2ban/jail.local
+# Then:    systemctl restart fail2ban
+#
+
+[DEFAULT]
+bantime   = 1h
+findtime  = 10m
+maxretry  = 5
+ignoreip  = 127.0.0.1/8 ::1 10.0.0.0/8 192.168.0.0/16
+backend   = auto
+
+# ── Server ID for central sync (change per server) ──────────────────────
+central_api_server_id = $(hostname -f)
+
+# ── Combined action: iptables block + sync to central collector ─────────
+action_sync = iptables-allports
+              central-api[server_id="%(central_api_server_id)s"]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SSH
+# ═══════════════════════════════════════════════════════════════════════════
+[sshd]
+enabled   = true
+port      = ssh
+filter    = sshd
+logpath   = /var/log/auth.log
+maxretry  = 4
+findtime  = 5m
+bantime   = 2h
+action    = %(action_sync)s
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FreeSWITCH / FusionPBX — SIP Auth Failures
+# ═══════════════════════════════════════════════════════════════════════════
+[freeswitch-auth]
+enabled   = true
+port      = 5060,5061,5080,5081
+protocol  = tcp,udp
+filter    = freeswitch
+logpath   = /var/log/freeswitch/freeswitch.log
+maxretry  = 5
+findtime  = 1m
+bantime   = 24h
+action    = %(action_sync)s
+
+[freeswitch-dos]
+enabled   = true
+port      = 5060,5061,5080,5081
+protocol  = tcp,udp
+filter    = freeswitch-dos
+logpath   = /var/log/freeswitch/freeswitch.log
+maxretry  = 30
+findtime  = 30s
+bantime   = 72h
+action    = %(action_sync)s
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CyberPanel / OpenLiteSpeed / WordPress
+# ═══════════════════════════════════════════════════════════════════════════
+[wordpress-auth]
+enabled   = true
+port      = http,https
+filter    = wordpress-auth
+logpath   = /home/*/logs/*.access_log
+maxretry  = 5
+findtime  = 5m
+bantime   = 6h
+action    = %(action_sync)s
+
+[wordpress-xmlrpc]
+enabled   = true
+port      = http,https
+filter    = wordpress-auth
+logpath   = /home/*/logs/*.access_log
+maxretry  = 2
+findtime  = 1m
+bantime   = 24h
+action    = %(action_sync)s
+
+[ols-admin]
+enabled   = true
+port      = 7080,7443
+filter    = openlitespeed-admin
+logpath   = /usr/local/lsws/logs/error.log
+maxretry  = 3
+findtime  = 5m
+bantime   = 12h
+action    = %(action_sync)s
+
+[ols-scan]
+enabled   = true
+port      = http,https
+filter    = ols-scan
+logpath   = /home/*/logs/*.access_log
+maxretry  = 10
+findtime  = 2m
+bantime   = 24h
+action    = %(action_sync)s
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pure-FTPd
+# ═══════════════════════════════════════════════════════════════════════════
+[pure-ftpd]
+enabled   = true
+port      = ftp,ftp-data,20,21,990
+protocol  = tcp
+filter    = pure-ftpd-custom
+logpath   = /var/log/syslog
+maxretry  = 4
+findtime  = 5m
+bantime   = 6h
+action    = %(action_sync)s
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Postfix / Dovecot (if email is hosted here)
+# ═══════════════════════════════════════════════════════════════════════════
+#[postfix-sasl]
+#enabled   = true
+#port      = smtp,smtps,submission,465,587
+#protocol  = tcp
+#filter    = postfix-sasl
+#logpath   = /var/log/mail.log
+#maxretry  = 5
+#findtime  = 5m
+#bantime   = 6h
+#action    = %(action_sync)s
+
+#[dovecot]
+#enabled   = true
+#port      = imap,imaps,pop3,pop3s,143,993,110,995
+#protocol  = tcp
+#filter    = dovecot
+#logpath   = /var/log/mail.log
+#maxretry  = 5
+#findtime  = 5m
+#bantime   = 6h
+#action    = %(action_sync)s
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Recidive — Multi-jail repeat offenders get 4-week ban
+# ═══════════════════════════════════════════════════════════════════════════
+[recidive]
+enabled   = true
+filter    = recidive
+logpath   = /var/log/fail2ban.log
+maxretry  = 3
+findtime  = 1d
+bantime   = 4w
+action    = iptables-allports
