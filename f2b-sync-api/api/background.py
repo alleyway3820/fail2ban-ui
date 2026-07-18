@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 
 import aiosqlite
 
@@ -11,6 +12,23 @@ logger = logging.getLogger(__name__)
 F2B_DB_PATH = os.getenv("DB_PATH", "/data/f2b.db")
 
 _bg_task: asyncio.Task | None = None
+
+
+async def cleanup_expired_whitelist():
+    """Remove expired TTL-based whitelist entries."""
+    try:
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            now = datetime.now(timezone.utc).isoformat()
+            async with db.execute(
+                "DELETE FROM ip_whitelist WHERE expires_at IS NOT NULL AND expires_at < ?",
+                (now,),
+            ) as cur:
+                deleted = cur.rowcount
+            if deleted:
+                await db.commit()
+                logger.info("Cleaned up %s expired whitelist entries", deleted)
+    except Exception as e:
+        logger.error("Error cleaning up expired whitelist: %s", e)
 
 
 async def refresh_global_blocklist():
@@ -70,9 +88,11 @@ async def refresh_global_blocklist():
 
 
 async def _background_loop():
+    await cleanup_expired_whitelist()
     await refresh_global_blocklist()
     while True:
         await asyncio.sleep(3600)
+        await cleanup_expired_whitelist()
         await refresh_global_blocklist()
 
 

@@ -109,6 +109,15 @@ class AddServerRequest(BaseModel):
 class WhitelistRequest(BaseModel):
     ip: str = Field(max_length=39)
     reason: Optional[str] = Field(default=None, max_length=500)
+    ttl_hours: Optional[int] = Field(default=None, ge=1, le=720)  # NULL=permanent
+
+
+class RegisterRequest(BaseModel):
+    """Called by FreeSWITCH on successful SIP REGISTER"""
+    ip: str = Field(max_length=39)
+    extension: str = Field(max_length=50)
+    server_id: str = Field(max_length=100)
+    ttl_hours: int = Field(default=48, ge=1, le=720)
 
 
 # ── Auth endpoints ─────────────────────────────────────────────────────────────
@@ -420,12 +429,63 @@ async def delete_server(server_id: int, _user: dict = Depends(jwt_auth)):
     return {"status": "ok"}
 
 
+@router.get("/whitelist/check/{ip}")
+async def check_whitelist(ip: str, _server_name: str = Depends(verify_api_key)):
+    """Check if an IP is whitelisted. Called by fail2ban action before banning."""
+    validate_ip(ip)
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, ip_address, reason, expires_at, created_at FROM ip_whitelist WHERE ip_address = ?",
+            (ip,),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return {"whitelisted": False}
+    return {
+        "whitelisted": True,
+        "ip": row["ip_address"],
+        "reason": row["reason"],
+        "expires_at": row["expires_at"],
+    }
+
+
+@router.post("/whitelist/register", status_code=200)
+async def register_sip_phone(req: RegisterRequest, _server_name: str = Depends(verify_api_key)):
+    """
+    Called by FreeSWITCH on successful SIP REGISTER.
+    Auto-whitelists the phone's IP with a TTL so dynamic IPs auto-expire.
+    Removes any existing ban for this IP.
+    """
+    import datetime
+    validate_ip(req.ip)
+    expires_at = (datetime.datetime.now(datetime.timezone.utc) +
+                  datetime.timedelta(hours=req.ttl_hours)).isoformat()
+
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        # Upsert whitelist with TTL
+        await db.execute(
+            "INSERT OR REPLACE INTO ip_whitelist (ip_address, reason, expires_at) VALUES (?, ?, ?)",
+            (req.ip, f"auto: SIP register {req.extension} on {req.server_id}", expires_at),
+        )
+        # Remove from global blocklist
+        await db.execute("DELETE FROM global_blocklist WHERE ip_address = ?", (req.ip,))
+        await db.commit()
+
+    return {
+        "status": "ok",
+        "ip": req.ip,
+        "whitelisted": True,
+        "expires_at": expires_at,
+    }
+
+
 @router.get("/whitelist")
 async def list_whitelist(_user: dict = Depends(jwt_auth)):
     async with aiosqlite.connect(DATABASE_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT id, ip_address, reason, created_at FROM ip_whitelist ORDER BY created_at DESC"
+            "SELECT id, ip_address, reason, expires_at, created_at FROM ip_whitelist ORDER BY created_at DESC"
         ) as cur:
             rows = await cur.fetchall()
     return {"whitelist": [dict(r) for r in rows]}
@@ -435,10 +495,19 @@ async def list_whitelist(_user: dict = Depends(jwt_auth)):
 async def add_whitelist(req: WhitelistRequest, _user: dict = Depends(jwt_auth)):
     validate_ip(req.ip)
     async with aiosqlite.connect(DATABASE_PATH) as db:
-        await db.execute(
-            "INSERT OR REPLACE INTO ip_whitelist (ip_address, reason) VALUES (?, ?)",
-            (req.ip, req.reason),
-        )
+        if req.ttl_hours:
+            import datetime
+            expires_at = (datetime.datetime.now(datetime.timezone.utc) +
+                          datetime.timedelta(hours=req.ttl_hours)).isoformat()
+            await db.execute(
+                "INSERT OR REPLACE INTO ip_whitelist (ip_address, reason, expires_at) VALUES (?, ?, ?)",
+                (req.ip, req.reason, expires_at),
+            )
+        else:
+            await db.execute(
+                "INSERT OR REPLACE INTO ip_whitelist (ip_address, reason, expires_at) VALUES (?, ?, NULL)",
+                (req.ip, req.reason),
+            )
         await db.execute("DELETE FROM global_blocklist WHERE ip_address = ?", (req.ip,))
         await db.commit()
     return {"status": "ok", "ip": req.ip}

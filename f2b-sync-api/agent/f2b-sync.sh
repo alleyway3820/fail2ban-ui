@@ -79,6 +79,42 @@ for entry in data.get('ips', []):
 
 log "Sync complete: added=$ADDED IPs to ipset $IPSET_NAME"
 
+# ── Check whitelist — remove any whitelisted IPs from the blocklist ─────
+# This prevents authenticated SIP phones from being blocked after their
+# IP was added to the blocklist for a different reason.
+COLLECTOR_BASE="${COLLECTOR_URL%/}"
+WHITELIST_RESPONSE=$(curl -s \
+    -H "X-API-Key: ${API_KEY}" \
+    --max-time 15 \
+    "${COLLECTOR_BASE}/api/v1/whitelist" 2>>"$LOG_FILE") || WHITELIST_RESPONSE=""
+
+if [[ -n "$WHITELIST_RESPONSE" ]]; then
+    UNBANNED=0
+    while IFS= read -r wl_ip; do
+        [[ -z "$wl_ip" ]] && continue
+        # Remove from ipset if present
+        if ipset test "$IPSET_NAME" "$wl_ip" &>/dev/null; then
+            ipset del "$IPSET_NAME" "$wl_ip" 2>/dev/null && UNBANNED=$((UNBANNED + 1)) || true
+            log "Whitelisted IP $wl_ip removed from blocklist"
+        fi
+        # Also unban from local fail2ban
+        if command -v fail2ban-client &>/dev/null; then
+            JAIL_LIST=$(fail2ban-client status 2>/dev/null | grep "Jail list:" | sed 's/.*Jail list:\s*//' | tr ',' ' ' | tr -d ' ')
+            for jail_name in $JAIL_LIST; do
+                fail2ban-client set "$jail_name" unbanip "$wl_ip" 2>/dev/null || true
+            done
+        fi
+    done < <(echo "$WHITELIST_RESPONSE" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for entry in data.get('whitelist', []):
+    print(entry['ip'])
+" 2>/dev/null)
+    if [[ "$UNBANNED" -gt 0 ]]; then
+        log "Whitelist check: unblocked $UNBANNED whitelisted IPs from $IPSET_NAME"
+    fi
+fi
+
 # ── Save timestamp ─────────────────────────────────────────────────────────────
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$STATE_FILE"
 

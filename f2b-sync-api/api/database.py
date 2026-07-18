@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS ip_whitelist (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ip_address TEXT NOT NULL UNIQUE,
     reason TEXT,
+    expires_at TIMESTAMP,           -- NULL = permanent, set = auto-expire
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
