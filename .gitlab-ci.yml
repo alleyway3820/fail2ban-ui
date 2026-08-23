@@ -1,0 +1,18 @@
+stages:
+  - mirror
+
+# Weekly backup mirror to GitHub. Runs only on the scheduled pipeline --
+# GitLab is the primary dev host (issues/MRs/CI), GitHub is a read-only
+# backup copy so GitHub Actions billing/minutes never matter.
+mirror_to_github:
+  stage: mirror
+  tags: []
+  needs: []
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  script:
+    # NOT --mirror: that would delete any GitHub branch/tag not present in
+    # this checkout. fetch-all + push-update-only-refspec can create/update
+    # refs but never delete them -- correct semantics for a one-way backup.
+    - git fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'
+    - git push "https://alleyway3820:${GITHUB_MIRROR_TOKEN}@github.com/alleyway3820/${CI_PROJECT_NAME}.git" 'refs/remotes/origin/*:refs/heads/*' --tags
